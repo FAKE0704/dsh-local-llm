@@ -1,0 +1,15 @@
+{
+  "name": "dsh-local-llm",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.js",
+  "description": "本机无头本地 LLM 的 dsh 插件：登记/探活/启停/问答/拉取五元工具（登记表 ~/.dsh/local-models.yaml，零依赖自包含，start/stop/pull 过审批门）。真源 = FAKE0704/Genshu packages/dsh-plugins/dsh-local-llm（本仓为镜像）",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/FAKE0704/dsh-local-llm.git"
+  },
+  "license": "MIT",
+  "engines": {
+    "dsh": ">=0.2.1-alpha.1 <0.3.0"
+  }
+}
