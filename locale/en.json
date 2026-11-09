@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Local models",
+    "description": "Registers headless local LLMs (llama.cpp, vLLM, ollama): download from Hugging Face or ModelScope, deploy, and pick them in the composer model selector."
+  }
+}

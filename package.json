@@ -1,9 +1,10 @@
 {
   "name": "dsh-local-llm",
-  "version": "1.0.0",
+  "version": "1.2.5",
+  "private": true,
   "type": "module",
   "main": "index.js",
-  "description": "本机无头本地 LLM 的 dsh 插件：登记/探活/启停/问答/拉取五元工具（登记表 ~/.dsh/local-models.yaml，零依赖自包含，start/stop/pull 过审批门）。真源 = FAKE0704/Genshu packages/dsh-plugins/dsh-local-llm（本仓为镜像）",
+  "description": "本机无头本地 LLM 的 dsh 插件：登记/探活/启停/问答/拉取五元工具 + 设置页（路径/下载/部署）+ provider 注册（部署后的本地模型进入 Composer 模型选择与设置-模型页）",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/FAKE0704/dsh-local-llm.git"
@@ -11,5 +12,33 @@
   "license": "MIT",
   "engines": {
     "dsh": ">=0.2.1-alpha.1 <0.3.0"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "host-service.js",
+    "core.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": { "patch": "./cordis.patch.yml" },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-models"
+      ]
+    }
   }
 }

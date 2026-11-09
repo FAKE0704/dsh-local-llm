@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "本地模型",
+    "description": "接入本机无头本地小模型（llama.cpp / vLLM / ollama）：从 Hugging Face 或魔搭下载、一键部署，并在 Composer 模型选择中使用。"
+  }
+}

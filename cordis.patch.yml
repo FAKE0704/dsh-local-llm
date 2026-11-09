@@ -1,0 +1,4 @@
+- insert:
+    - id: dsh-local-llm
+      name: dsh-local-llm
+      config: {}
