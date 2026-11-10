@@ -14,8 +14,6 @@ window.__ModuleLoader__.load({
     const h = React.createElement
     const { useState, useEffect, useRef, useCallback } = React
 
-    const WEB_PATH = 'api/dsh-local-llm'
-
     // ---------- 文案（快照取 locale，双字典兜底） ----------
     const STRINGS = {
       zh: {
@@ -121,11 +119,12 @@ window.__ModuleLoader__.load({
     function makeT(ctx) {
       let lang = 'en'
       try {
-        // LocaleSnapshot 的字段是 active（.locale/.id 不存在——V1 在这里猜错字段名，
-        // 界面恒落英文；已对照 @deepseek-ai/dsh-client-locale 类型修正）。
-        const snapshot = ctx.get('locale')?.getLocale?.()
-        const id = String(snapshot?.active ?? '')
-        if (id.toLowerCase().startsWith('zh')) lang = 'zh'
+        // LocaleSnapshot 字段名跨版本不稳（active/locale/id/current…）——多字段
+        // 探测 + getLocale/getSnapshot 双方法兜底，命中任一 zh* 即中文。
+        const svc = ctx.get('locale')
+        const snap = svc?.getLocale?.() ?? svc?.getSnapshot?.()
+        const cands = [snap?.active, snap?.locale, snap?.id, snap?.current, snap?.resolved, snap?.language]
+        if (cands.some((c) => typeof c === 'string' && c.toLowerCase().startsWith('zh'))) lang = 'zh'
       } catch { /* 继续探测浏览器语言 */ }
       if (lang !== 'zh') {
         try {
@@ -153,18 +152,64 @@ window.__ModuleLoader__.load({
       }
     }
 
+    // ---------- RPC 传输（官方 Typert Remote 通道；范本 dsh-fabric-memory） ----------
+    const identity = (value) => value
+    const codec = (typeSymbol) => ({
+      mode: 'strict',
+      typeSymbol,
+      create: () => ({ parse: identity }),
+    })
+    const descriptor = (method, hasParams = true) => ({
+      id: `dsh-local-llm#localLlm/${method}`,
+      service: 'localLlm',
+      namespace: 'localLlm',
+      method,
+      invocation: { kind: 'direct' },
+      parameters: hasParams ? [{ name: 'params', wire: 'params', source: 'json', codec: codec(`dsh-local-llm#${method}Params`) }] : [],
+      result: codec('dsh-local-llm#RpcResult'),
+    })
+    const CONTRIBUTION = {
+      package: 'dsh-local-llm',
+      descriptors: [
+        descriptor('list', false), descriptor('preview'), descriptor('pull'),
+        descriptor('deploy'), descriptor('stop'), descriptor('setModelsDir'),
+        descriptor('scan'), descriptor('registerEntry'),
+      ],
+    }
+    const rpcTransport = {
+      ctx: null,
+      mountPromise: null,
+      bind(ctx) {
+        this.ctx = ctx
+        try {
+          const remote = ctx.get('remote')
+          this.mountPromise = remote?.$mount?.(CONTRIBUTION) ?? Promise.reject(new Error('ctx.remote 不可用'))
+        } catch (err) {
+          this.mountPromise = Promise.reject(err)
+        }
+        this.mountPromise.catch(() => { /* 延迟到调用面报错 */ })
+      },
+      async call(method, args) {
+        try {
+          await this.mountPromise
+          const ns = this.ctx?.get?.('remote.localLlm')
+          if (!ns || typeof ns[method] !== 'function') {
+            return { ok: false, message: `remote.localLlm.${method} 不可用（命名空间未挂载）` }
+          }
+          const hasParams = method !== 'list'
+          const result = await ns[method](...(hasParams ? [args ?? {}] : []))
+          if (result?.ok === true) return result.value ?? { ok: false, message: 'empty value' }
+          const failure = result?.error
+          const msg = failure ? `${failure.code || 'REMOTE'}: ${failure.message || ''}` : 'rpc 调用失败'
+          return { ok: false, message: msg.slice(0, 300) }
+        } catch (err) {
+          return { ok: false, message: `rpc ${method} 异常：${err instanceof Error ? err.message.slice(0, 200) : String(err)}` }
+        }
+      },
+    }
+
     function apiCall(method, args) {
-      return fetch(new URL(WEB_PATH, location.href), {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ method, args: args ?? {} }),
-      })
-        .then(async (res) => {
-          const data = await res.json().catch(() => null)
-          if (data === null) return { ok: false, message: `HTTP ${res.status}` }
-          return data
-        })
-        .catch((err) => ({ ok: false, message: err instanceof Error ? err.message : String(err) }))
+      return rpcTransport.call(method, args)
     }
 
     function StatusDot({ up }) {
@@ -221,6 +266,10 @@ window.__ModuleLoader__.load({
           } else if (res.error) {
             setData(null)
             setLoadError(`${t('emptyError')}${res.error}`)
+          } else if (res.ok === false && res.message) {
+            // 传输层失败（rpc/HTTP）必须可见，不能伪装成「登记表不存在」
+            setData(null)
+            setLoadError(`list 调用失败：${res.message}`)
           } else {
             setData({ models: [], registryPath: res.registryPath ?? '' })
             setLoadError(t('emptyMissing'))
@@ -258,14 +307,23 @@ window.__ModuleLoader__.load({
         async function onPick() {
           setPicking(true)
           try {
-            const dir = await pickDirectory()
-            if (dir) {
-              scannedRef.current = false // 目录变了，重扫
-              const res = await apiCall('setModelsDir', { dir })
-              setResult({ ok: res.ok === true, text: res.ok ? String(res.registryPath ?? dir) : String(res.message ?? 'failed') })
-              await refresh()
-              void runScan()
+            let dir
+            try {
+              dir = await pickDirectory()
+            } catch (err) {
+              // 目录选择器异常必须可见——静默吞掉表现为「点了没反应」
+              setResult({ ok: false, text: `${t('pick')} failed: ${err instanceof Error ? err.message : String(err)}` })
+              return
             }
+            if (!dir) {
+              setResult({ ok: false, text: `${t('pick')} → null（目录选择器不可用或已取消）` })
+              return
+            }
+            scannedRef.current = false // 目录变了，重扫
+            const res = await apiCall('setModelsDir', { dir })
+            setResult({ ok: res.ok === true, text: res.ok ? String(res.registryPath ?? dir) : String(res.message ?? 'failed') })
+            await refresh()
+            void runScan()
           } finally {
             setPicking(false)
           }
@@ -636,9 +694,11 @@ window.__ModuleLoader__.load({
 `
 
     return {
-      inject: ['slots'],
+      // remote：官方 Remote 传输；locale：语言服务（不在 inject 里受限上下文拿不到）
+      inject: ['slots', 'remote', 'locale'],
       apply(ctx) {
         const t = makeT(ctx)
+        rpcTransport.bind(ctx)
         const Page = makePage(ctx, t)
         const Footer = makeFooter(ctx, t)
         const ProviderCard = makeProviderCard(ctx, t)

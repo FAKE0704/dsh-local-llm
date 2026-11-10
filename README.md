@@ -51,7 +51,9 @@ All registered models are kept in a YAML file, resolved in this order:
 
 ## Environment notes
 
-The "Settings → Local Models" page and chat integration rely on the dsh Web UI (served over a local HTTP server). If your host has no web server, the plugin falls back to tools-only mode — all five tools still work, just without the settings page.
+The "Settings → Local Models" page talks to the Host through the official Typert Remote channel (`typert` registry + `ctx.remote` on the client), which works in both the desktop app and `dsh web`. On web-only hosts an exact HTTP route (`/api/dsh-local-llm`) is registered as a secondary bridge. If neither transport is available, the plugin falls back to tools-only mode — all five tools still work, just without the settings page.
+
+Requires `dsh >= 0.2.1-alpha.1 <0.3.0` (engines field). Client-half changes only reach already-open pages after a host restart; the plugin version is bumped on every client change so module caches invalidate.
 
 ## Community and support
 

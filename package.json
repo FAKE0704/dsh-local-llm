@@ -1,9 +1,13 @@
 {
   "name": "dsh-local-llm",
-  "version": "1.2.5",
+  "version": "1.6.1",
   "private": true,
   "type": "module",
   "main": "index.js",
+  "dependencies": {
+    "@deepseek-ai/dsh-typert-protocol": "^0.2.1-rc.1",
+    "zod": "^4.4.3"
+  },
   "description": "本机无头本地 LLM 的 dsh 插件：登记/探活/启停/问答/拉取五元工具 + 设置页（路径/下载/部署）+ provider 注册（部署后的本地模型进入 Composer 模型选择与设置-模型页）",
   "repository": {
     "type": "git",
@@ -22,6 +26,7 @@
   "files": [
     "index.js",
     "host-service.js",
+    "remote.js",
     "core.js",
     "client.js",
     "cordis.patch.yml",

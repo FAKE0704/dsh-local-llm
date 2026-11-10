@@ -11,9 +11,10 @@
 
 import { createSemantics, resolveRegistryPath } from './core.js'
 import { createLocalLlmService, PROVIDER_ID } from './host-service.js'
+import { LocalLlmGateway, LOCAL_LLM_MANIFEST } from './remote.js'
 
 export const name = 'dsh-local-llm'
-export const inject = ['tools']
+export const inject = ['tools', 'typert']
 
 // Config：不声明 schema（裸函数不是 Loader 期望的 schemastery 面，激活即崩——已实测）。
 // registryPath 的校验在 apply 内完成：非字符串/空串按缺省处理；用户经设置页
@@ -91,18 +92,22 @@ export function apply(ctx, config) {
       output: OUTPUT,
       async execute(args) {
         const result = await sem[OP_OF[name]](args)
-        if (result?.ok === true && MUTATING_OPS.has(OP_OF[name])) {
-          // agent 侧启停/拉取成功同样驱动模型目录刷新（选择器/设置页重载）
-          try { await svc.afterMutation() } catch { /* 目录广播失败不影响工具结果 */ }
-          // start/stop 后模型加载/退出都超过探活窗口——短周期复核让徽标及时翻转
-          if (OP_OF[name] === 'start') {
-            try { svc.schedulePostStartReprobe?.() } catch { /* 复核失败不影响工具结果 */ }
-          }
-          if (OP_OF[name] === 'stop') {
-            try { svc.schedulePostStopReprobe?.() } catch { /* 复核失败不影响工具结果 */ }
-          }
-        }
-        return result
+    // stop 不看 ok：进程退出慢时探活仍 200 → ok=false（「可能未生效」）恰恰是常态，
+    // 此刻最需要刷新目录 + 延迟复核把状态翻过来（与 host-service rpcLifecycle 同策略）
+    if (result?.ok === true && MUTATING_OPS.has(OP_OF[name])) {
+      // agent 侧启停/拉取成功同样驱动模型目录刷新（选择器/设置页重载）
+      try { await svc.afterMutation() } catch { /* 目录广播失败不影响工具结果 */ }
+    }
+    if (MUTATING_OPS.has(OP_OF[name])) {
+      // start/stop 后模型加载/退出都超过探活窗口——短周期复核让徽标及时翻转
+      if (OP_OF[name] === 'start' && result?.ok === true) {
+        try { svc.schedulePostStartReprobe?.() } catch { /* 复核失败不影响工具结果 */ }
+      }
+      if (OP_OF[name] === 'stop') {
+        try { svc.schedulePostStopReprobe?.() } catch { /* 复核失败不影响工具结果 */ }
+      }
+    }
+    return result
       },
     })
   }
@@ -181,14 +186,20 @@ export function apply(ctx, config) {
     })
   }
 
-  // ---------- V1：设置页 Web 桥（无 webServer 的宿主自动降级为纯工具形态） ----------
+  // ---------- V2：Typert Remote 服务（设置页官方通道，desktop/web 通吃） ----------
+  // 范本对照 dsh-fabric-memory：inject 'typert' + typert.register(清单) 声明端点
+  // （claimsEndpoint 优先查 typert.local），TypertRemoteService 子类构造即注册服务。
+  const typert = ctx.get('typert')
+  if (typert && typeof typert.register === 'function' && typeof LocalLlmGateway === 'function') {
+    ctx.effect(() => typert.register(LOCAL_LLM_MANIFEST))
+    // cordis Service 构造即 provide（key='localLlm'）；生命周期随本插件 fiber
+    new LocalLlmGateway(ctx, svc)
+  }
+
+  // ---------- V1：设置页 Web 桥（web 宿主兜底；desktop 无 webServer 自动降级） ----------
   const webServer = ctx.get('webServer')
   if (webServer && typeof webServer.register === 'function') {
-    const disposeRoute = webServer.register({
-      kind: 'exact',
-      path: svc.WEB_PATH,
-      handler: svc.handleRequest,
-    })
+    const disposeRoute = webServer.register({ kind: 'exact', path: svc.WEB_PATH, handler: svc.handleRequest })
     ctx.effect(() => disposeRoute)
   }
 

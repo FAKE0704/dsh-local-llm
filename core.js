@@ -27,6 +27,9 @@ const REPLY_CAP = 30000
 /** start 后探活窗口：最多 10 次 × 2s ≈ 18s（vLLM 类冷加载超窗则提示稍后复核） */
 const START_PROBE_ATTEMPTS = 10
 const START_PROBE_INTERVAL_MS = 2000
+/** stop 后退出窗口：最多 6 次 × 1.5s ≈ 9s（权重卸载通常数秒内完成） */
+const STOP_PROBE_ATTEMPTS = 6
+const STOP_PROBE_INTERVAL_MS = 1500
 
 /** 登记表路径（env DSH_LOCAL_MODELS_REGISTRY 覆盖；缺省 ~/.dsh/local-models.yaml，显式 HOME 优先） */
 export function resolveRegistryPath(explicit) {
@@ -500,13 +503,17 @@ export function createSemantics(opts = {}) {
         message: `${phase} 命令超 ${CMD_TIMEOUT_MS / 1000}s 已终止（${entry.id}）。命令：${cmd}\n输出尾部：\n${run.output || '（无输出）'}\n可能是拉镜像/加载权重超过窗口——确认后用 local-llm-list 复核状态。`,
       }
     }
-    // 探活复核：start 等待冷加载窗口（多次重试），stop 单次确认
+    // 探活复核：start 等待冷加载窗口（多次重试）；stop 也留退出窗口
+    // （pkill 发信号 → 进程清权重退出需数秒，立即探活必仍 200 误报「未生效」）
     let final = await probe(entry)
-    if (phase === 'start' && !final.up) {
-      for (let i = 1; i < START_PROBE_ATTEMPTS; i++) {
-        await doSleep(START_PROBE_INTERVAL_MS)
+    const attempts = phase === 'start' ? START_PROBE_ATTEMPTS : STOP_PROBE_ATTEMPTS
+    const interval = phase === 'start' ? START_PROBE_INTERVAL_MS : STOP_PROBE_INTERVAL_MS
+    const wantUp = phase === 'start'
+    if (final.up !== wantUp) {
+      for (let i = 1; i < attempts; i++) {
+        await doSleep(interval)
         final = await probe(entry)
-        if (final.up) break
+        if (final.up === wantUp) break
       }
     }
     const cmdLine = `${phase}（${entry.id}）exit=${run.code}${run.output ? `\n命令输出：\n${run.output}` : ''}`

@@ -30,7 +30,7 @@ export const PROVIDER_ID = 'local-llm'
 
 const PROBE_TIMEOUT_MS = 2500
 const WEB_PATH = '/api/dsh-local-llm'
-const USER_AGENT = 'deepseek-harness (+https://github.com/deepseek-ai/deepseek-harness) dsh-local-llm/1.2.5'
+const USER_AGENT = 'deepseek-harness (+https://github.com/deepseek-ai/deepseek-harness) dsh-local-llm/1.2.6'
 const PULL_PROBE_CMD = 'for b in ollama hf huggingface-cli modelscope llama-server vllm; do command -v "$b" >/dev/null 2>&1 && echo "$b"; done'
 const PULL_PROBE_TIMEOUT_MS = 5000
 
@@ -967,6 +967,13 @@ export function createLocalLlmService({ ctx, registryPath }) {
     registerEntry: (args) => rpcRegisterEntry(args),
   }
 
+  /** Remote/桥公共分发面：method 必须是 METHODS 实名（fail-closed，不猜）。 */
+  async function rpcInvoke(method, params) {
+    const fn = Object.hasOwn(METHODS, String(method)) ? METHODS[String(method)] : null
+    if (fn === null) return { ok: false, message: `未知方法 "${String(method)}"（支持：${Object.keys(METHODS).join('/')}）` }
+    return fn(params ?? {})
+  }
+
   function handleRequest(req, res) {
     if (req.method !== 'POST') {
       res.writeHead(405, { allow: 'POST' })
@@ -1151,6 +1158,7 @@ export function createLocalLlmService({ ctx, registryPath }) {
     reprobeRunning,
     schedulePostStartReprobe,
     schedulePostStopReprobe,
+    rpcInvoke,
     DIRECTORY_NS,
     WEB_PATH,
   }
